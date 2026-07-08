@@ -1,0 +1,35 @@
+# GambitSMP configuration
+
+max-equipped-cards: 3
+
+# how a card is "activated" for the ones with cooldowns:
+# right-click while sneaking with an empty hand cycles through your
+# equipped active cards and triggers the next one that's off cooldown.
+active-trigger: sneak-right-click
+
+hearts-lost-on-death-without-cards: 2
+max-hearts: 20
+
+drop:
+  mystery-card-enabled: true
+
+shrines:
+  glory-heart-gain: 1
+  abysmal-heart-cost: 1
+  opportunity-reroll-cost: 1
+
+cooldowns:
+  nightbringer-seconds: 180
+  warden-beam-seconds: 180
+  gravity-seconds: 120
+  negation-seconds: 45
+  berserk-seconds: 30
+
+chances:
+  frozen-anchor: 0.15
+  grounding-bolt: 0.10
+  metal-thief: 0.25
+  heavy-swing: 0.05
+  dark-hours-per-minute: 0.10
+  gruesome-harvest-per-30s: 0.10
+  greeds-touch: 0.25
