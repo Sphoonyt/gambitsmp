@@ -10,6 +10,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: GambitSMP
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,5 +31,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: GambitSMP
-          path: target/GambitSMP.jar
+          path: GambitSMP/target/GambitSMP.jar
           if-no-files-found: error
