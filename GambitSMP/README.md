@@ -1,0 +1,295 @@
+# GambitSMP
+
+A custom Paper plugin (Java 17, targets Paper 1.20.4) implementing your GambitSMP card system:
+right-clickable "card" items that grant passive or active abilities, legendary items,
+a kill-drop "mystery card" system, a card-reroll shrine, a custom purple dimension with its
+own portal system, and full persistence so equipped cards survive logging out and restarts.
+
+## Building
+
+```
+cd GambitSMP
+mvn package
+```
+
+This needs internet access to `repo.papermc.io` and Maven Central (it wasn't buildable in this
+sandbox because that domain isn't reachable from here — pull the project down and build it
+locally or in your normal dev environment). The shaded jar lands in `target/GambitSMP.jar`;
+drop it in your server's `plugins/` folder. Requires Paper 1.20.4 (or update the `pom.xml`
+version + adjust any changed API calls for a different Minecraft version).
+
+## How it works
+
+### Cards
+- Every card is a `PAPER` item with the card's name/description in its lore and a hidden NBT
+  tag identifying it. Right-click (not sneaking) with a card item to **equip** it — this
+  consumes the item and adds it to your equipped list (default max **3**, change
+  `max-equipped-cards` in `config.yml`).
+- Cards are either:
+  - **Passive** — always on while equipped (e.g. Reinforced Armor, Hellflame, Feather).
+  - **Active** — has a cooldown, and you trigger it with **sneak + right-click while your hand
+    is empty**. If you have more than one active card equipped, the first one that's off
+    cooldown fires. Active cards: Berserk, Negation, Nightbringer, Warden Beam, Gravity.
+- `/gambit cards [player]` lists someone's equipped cards, legendaries and max hearts.
+- `/gambit unequip <CARD_NAME>` unequips a card back into your inventory as an item.
+- Admin: `/gambit give card <player> <CARD_NAME>` to spawn any card in.
+
+### Legendaries
+- Legendary items work the same way (right-click to equip) and grant a bonus passive:
+  - **Sunken Anchor** → King of the Sea (+30% damage while in water)
+  - **Rosen Hellfire** → Immortal Flames (longer/harder-to-put-out fire — currently a flag
+    other card logic can check via `PlayerCardData#hasImmortalFlames()`; extend `CombatListener`
+    /a `EntityCombustEvent` listener if you want it to also extend the wearer's own burn time)
+  - **Vampiric Claws** → Hard Syphon (+50% to any healing from your cards, e.g. Vampiric)
+  - **Fang** → Venomous Snake (your hits poison; hook up rotten-flesh-as-golden-carrot in a
+    `PlayerItemConsumeEvent`/`FoodLevelChangeEvent` listener the same way — stubbed out as a
+    clearly marked spot to extend)
+  - **Fang + Vampiric Claws combined in an anvil** → **Vampiric Fang**, a standalone Netherite
+    Sword-based weapon that lifesteals half a heart per hit, no card slot required.
+
+### Kill drops
+- When a player kills another player, a **Mystery Card** drops at the death location. It has a
+  card already secretly rolled onto it. Right-clicking it opens a small menu: **Use now**
+  (equip immediately, or get the physical card if your slots are full) or **Keep in inventory**
+  (get the physical, identified card item to equip whenever you want).
+
+### Shrines
+- Shrines are single trigger blocks placed by an admin: stand next to/look at the block and run
+  `/gambit shrine create opportunity`. Right-clicking that block opens the shrine's menu.
+  (This plugin only tracks the *interaction block* — building an actual temple structure around
+  it is on you / worldedit / a schematic.)
+  - **Shrine of Opportunity** — pick one of your equipped cards and reroll it into a new random
+    equipped card (never the same one, never one you already have, never a banned one).
+  - Shrine of Glory and Shrine of Abysmal (which traded cards for permanent heart gain/loss)
+    have been removed entirely, along with the deathban/hardcore-hearts system they were tied
+    to — dying no longer costs anything beyond the usual vanilla death penalties, and there's no
+    way to lose or gain max health through this plugin anymore.
+- `/gambit reset <player>` is an admin escape hatch that clears someone's equipped cards,
+  legendaries, and banned-card list, and heals them to full — useful for a fresh season/testing.
+
+### Card persistence
+- Equipped cards, legendaries, and banned cards are saved to `playerdata.yml` in the plugin's
+  data folder — they survive logging out, and full server restarts, not just staying online.
+- Saves happen on every player quit (writes everyone currently tracked, not just the player
+  leaving — simple and always fully consistent), on a clean server shutdown, and on a 5-minute
+  autosave timer as a safety net in case the server crashes without a clean shutdown.
+- Combat/movement state (cooldowns, hit counters, Bloodthirsty stacks, etc.) is deliberately
+  *not* persisted — that's live session state that's meant to reset, not carry over.
+
+## Design decisions worth knowing about
+
+Your spec left some mechanical details open to interpretation — here's what I chose, all easy
+to tweak in `CardType.java` / the listener files / `config.yml`:
+
+- **Activation model**: cards with a stated cooldown (Nightbringer, Warden Beam, Gravity,
+  and my additions Berserk + Negation) are "active" abilities triggered by sneak+right-click
+  with an empty hand. Everything else is passive and fires automatically off combat/movement
+  events. On-hit passive cards without a stated number (Vampiric, Frozen Anchor, Grounding
+  Bolt, Metal Thief, Heavy Swing, Greed's Touch) got sensible chances/internal cooldowns in
+  `config.yml` under `chances:` so they aren't spammy — tune freely.
+- **Piggy's Weight** triggers on ≥10-block-equivalent fall damage (5.0 raw fall damage ≈ 10 blocks).
+- **Combo** tracks hits per-victim, resets never (persists for the session) — extend with a decay
+  timer if you want it to reset after a gap.
+- **Blood Trail** shows particles to the *card owner* only, on any player below 50% health.
+- Card pool for Mystery Card drops and Shrine of Opportunity is a flat random pick across all 27
+  cards (no rarity weighting yet) — easy to weight by `CardRarity` if you want legendaries/rares
+  to be scarcer.
+
+### Custom textures
+- Every card, legendary, and the Mystery Card drop carries a `CustomModelData`
+  value (see `CardType.customModelData()` / `LegendaryType.customModelData()`),
+  so a resource pack can give each one a distinct icon without any NBT hacks.
+- A ready-to-use resource pack skeleton with placeholder (solid color,
+  rarity-tinted) textures already wired up ships alongside this project - see
+  `GambitSMP-resourcepack/README.md`. Load it, and everything already looks
+  different from vanilla items; swap the placeholder PNGs for real art whenever
+  you're ready, no plugin changes required.
+
+### Balance pass (latest)
+- **Vampiric**: bonus damage/heal cut from 3 hearts to 1, proc chance cut from 20% to
+  15%, and it can now never be lethal on its own - if the bonus would kill the
+  victim, it's clamped so they survive at exactly half a heart instead.
+- **Active cards are no longer guaranteed to fire**: sneaking+right-clicking (or
+  `/ability`) now only has a flat chance (`chances.active-ability-trigger`, 15% by
+  default) of actually activating even when off cooldown - the cooldown is consumed
+  either way, so spam-retrying isn't a way around it. A card that fizzles says so.
+- **Hellflame** reworked from a silent always-on +10% damage modifier into a
+  discrete proc on a cooldown: still +10% damage while on fire, but now also grants
+  30 seconds of Fire Resistance, and can't proc again until its cooldown clears.
+- **Bloodthirsty** capped at Speed II (was scaling up to Speed IV), and now clears
+  all stacks instantly the moment its owner takes any hit, rather than only decaying
+  slowly over a few seconds of not attacking.
+- **Grounding Bolt** now deals 3 hearts of true damage (bypasses armor entirely -
+  applied directly rather than through the normal reducible damage pipeline) plus
+  Slowness I for 5 seconds, on a cooldown.
+- **Frozen Anchor** is now a flat 10% chance with its own cooldown on top.
+- **Combo** nerfed again: bonus down to half a heart, and now needs every 4th hit
+  instead of every 3rd.
+- **Greed's Touch** now also grants a longer (20s) Absorption II buff on proc.
+- **New cooldowns** added to several cards that previously had none or only a
+  chance gate: Grounding Bolt, Frozen Anchor, Vampiric, Gluttonous, Piggy's Weight,
+  Dark Hours, Hellflame. All the specific values live in `config.yml` under
+  `cooldowns:` if you want to retune any of them.
+
+### Feedback (sounds & particles)
+- Every card, legendary, and the Mystery Card has its own tailored sound/particle
+  combo when it actually does something - not one generic "ding" reused everywhere.
+  A few examples of the reasoning: Berserk gets a roar + rising flames (aggressive),
+  Negation gets a totem shimmer (defensive/protective), Phantom's vanish gets an
+  Enderman-teleport warp + smoke poof, Frozen Anchor's freeze gets a glass-forming
+  crystallize sound. Full breakdown is in the inline comments in `ActiveCardService`,
+  `CombatListener`, `MovementListener`, and `PeriodicTaskManager`.
+- Active-card feedback plays at the **world** level (audible/visible to nearby
+  players), not just to the caster - on a PvP SMP, "did they just pop an ability"
+  matters to everyone around, not only the person who pressed the button.
+- High-frequency passives (Bloodthirsty's per-hit stacking, Vampiric Fang's
+  per-hit lifesteal, Reinforced Armor's durability save) intentionally get quiet
+  particle-only feedback with no sound, since anything louder would get grating
+  within seconds of real combat. Rarer procs (Vampiric's chance, Greed's Touch,
+  Metal Thief) get a full sound+particle combo since they don't repeat as often.
+- Continuously-active passives that ramp up over time (Speed Demon, Lightning
+  Speed) only play a sound/particle at the moment they cross into a faster tier,
+  not on every tick - the tier-up is the actual notable event.
+- While going through this pass, I found Rosen Hellfire's "fire lasts longer"
+  effect had never actually been wired to anything - it's now hooked up via
+  `EntityCombustEvent` (extends burn duration by 75%) with its own feedback.
+
+### CardDimension
+- Brand new players spawn in a custom dimension called **CardDimension** on their
+  very first join (returning players who die/respawn use normal vanilla bed/anchor
+  rules, unaffected). Anyone can get there any time with **`/gambit spawn`**, which
+  teleports you to right in front of the portal.
+- At CardDimension's spawn sits a **large obsidian nether portal** (5 wide x 4 tall
+  interior by default, configurable) that starts **unlit** - it's just an obsidian
+  frame until activated. A **lodestone** sits a few blocks in front of it. Right-click
+  the lodestone while holding a **Special Matter** item (`/gambit give specialmatter
+  <player>` to obtain one, admin-only) to consume it and light the portal - after
+  that, walking through sends you to the main overworld's spawn point.
+- A matching **return portal** is automatically built a few blocks from the
+  overworld's own spawn point the first time the plugin starts up - unlike the
+  CardDimension-side portal, this one is **pre-lit immediately**, no ritual needed,
+  since it's just the way back. Walking through it sends you to CardDimension's
+  spawn. Any *other* portal a player builds in the overworld (their own Nether
+  portal, etc.) is left completely untouched - only this specific structure
+  redirects. On the CardDimension side, by contrast, *any* portal use anywhere in
+  that dimension redirects to the overworld - CardDimension is only ever meant to
+  have one real destination, so that side doesn't need precise block matching.
+- Both portals' obsidian frames and interior portal blocks are **unbreakable**
+  (can't be broken by hand or by explosions), but nothing stops you building on top
+  of or around the frame - only the tracked frame/interior blocks themselves are
+  protected.
+- **Terrain** uses vanilla's **Amplified** world type - tall, exaggerated, dramatic
+  terrain shape is generated entirely by the game itself (not hand-rolled), which is
+  both simpler and far more reliable than a fully custom generator. The plugin adds
+  three things on top of that:
+  - **Ores** (coal/iron/gold/redstone/lapis/copper, no diamond, plus generous
+    scattered **Ancient Debris** as the netherite source, since vanilla doesn't have
+    a "netherite ore" block) at deliberately high rates, spanning real Y-coordinates
+    from the surface all the way down into deepslate territory (the stone/deepslate
+    transition sits around Y=0 in vanilla, regardless of how tall the surface
+    terrain is at any given spot) - each vein correctly places the deepslate variant
+    of its ore once it's below that line. All of this is placed by a small custom
+    populator; vanilla's own ore generation doesn't run here at all, since the biome
+    CardDimension uses (see below) is defined with no ore features of its own - so
+    there's no double-generation to worry about.
+  - **Sparse spruce trees**, same populator system as the ores.
+  - **Structures**: every standard overworld structure (villages, pillager outposts,
+    mineshafts, ruined portals, shipwrecks, ocean monuments, woodland mansions,
+    desert pyramids, igloos, jungle temples, swamp huts, ocean ruins, buried
+    treasure, ancient cities, trail ruins, trial chambers) is granted eligibility in
+    CardDimension's biome via small additive datapack tag files - **except
+    stronghold**, deliberately excluded per spec. These tags only *add* to vanilla's
+    existing eligibility lists rather than replacing them, so there's no risk of
+    breaking structure spawning anywhere else on the server. One honest caveat:
+    structures that depend on a specific real-world landscape feature tied to an
+    actual biome (ocean monuments needing deep ocean, buried treasure needing a
+    beach, jungle temples needing jungle terrain) may rarely or never actually find
+    a valid spot, simply because CardDimension's terrain doesn't have oceans,
+    beaches, or jungles in the geographic sense - that's a limitation of generating
+    one uniform biome everywhere, not a bug in the eligibility tags themselves.
+  - **No player-lit portals**: `PortalCreateEvent` is cancelled everywhere in
+    CardDimension, so flint & steel (or anything else that would normally ignite a
+    new portal) simply doesn't work there - the pre-built portal at spawn is the
+    only one that can ever exist in that dimension. This doesn't affect our own
+    portal's activation, since that's done via direct block placement rather than
+    the game's actual ignition mechanic.
+- **Purple grass, leaves, and water** all use *real* vanilla blocks, tinted purple
+  through two different mechanisms (details + the exact tradeoffs in
+  `GambitSMP-resourcepack/README.md`):
+  - Grass and water color come from a **datapack** (bundled in this plugin,
+    auto-installed into the default world's `datapacks/` folder on first run) that
+    overrides the unused `the_void` biome's colors. **This requires one full server
+    restart** after first install before the purple color shows up - biome/registry
+    data only loads at boot, not on `/reload`. Everything else about CardDimension
+    (world, portal, ores, trees, teleporting) works immediately regardless.
+  - On top of that, the world's biome is also **force-set explicitly** by a
+    populator (`CardDimensionBiomePopulator`) as every chunk generates, overwriting
+    whatever Amplified's own noise-based biome selection would otherwise assign.
+    This exists because the `BiomeProvider` hook alone wasn't reliably taking effect
+    against Amplified terrain in testing - the populator is a direct, guaranteed
+    write instead of hoping the two systems compose the way the API documents. If
+    you're updating from a version without this populator, you'll need a fresh
+    CardDimension world (see below) since already-generated chunks keep whatever
+    biome they were assigned at generation time.
+  - Spruce leaves specifically **ignore biome color entirely** in vanilla (a
+    hardcoded client quirk shared with birch leaves), so that trick doesn't work for
+    trees - the companion resource pack instead ships a pre-math'd texture override
+    for `spruce_leaves.png` that lands on purple *after* accounting for that fixed
+    tint. This one's a global override (affects spruce leaves everywhere on the
+    server, not just CardDimension) - there's no per-dimension texture mechanism to
+    scope it further within the public API.
+- **If you already ran the server before this fix**: chunks that were already
+  generated (as void) are saved to disk and won't regenerate just because the code
+  changed - Minecraft only runs the generator on chunks it hasn't created yet. After
+  updating, delete both `carddimension.yml` (in the plugin's data folder) and the
+  entire CardDimension world folder, then restart so both get rebuilt from scratch
+  against the fixed generator. This same "delete and regenerate" requirement applies
+  to the increased ore rates, deepslate ore variants, and structure eligibility
+  changes too - any chunk already on disk keeps whatever it was generated with,
+  permanently. Only freshly-explored chunks after updating will reflect changes.
+- **Known quirk**: because Amplified terrain can be extremely tall/jagged, the
+  portal's exact spawn spot is wherever the highest block happens to be at (0, 0) -
+  occasionally that could be a cliff edge or an odd perch. Same fix as above (delete
+  `carddimension.yml` + the world folder, restart) regenerates both at a fresh spot.
+- **Honesty note on risk**: this is the single most version-sensitive part of the
+  whole plugin - custom `ChunkGenerator`/`BiomeProvider` APIs and biome datapack
+  schemas are exactly the kind of thing that shifts between Minecraft versions, and
+  I wasn't able to compile-test any of it here. If world creation throws errors on
+  startup, the biome JSON schema and the `ChunkGenerator` method signatures in
+  `CardDimensionGenerator`/`CardDimensionManager` are the first places to check.
+
+## File map
+
+```
+com.gambitsmp
+├── GambitSMP.java              main plugin class / wiring
+├── cards/                      CardType enum, CardRarity, CardManager (item build/read)
+├── legendary/                  LegendaryType enum, LegendaryManager
+├── player/
+│   ├── PlayerCardData          per-player state (equipped cards, cooldowns, combat state)
+│   ├── PlayerDataManager       in-memory tracking + save/load to playerdata.yml
+│   └── PlayerDataPersistenceListener  saves everyone's data on each player quit
+├── shrine/                     ShrineType (Opportunity only), ShrineManager (persistence), ShrineListener (GUI)
+├── gui/                        CardGuiListener (admin card browser + player equip GUI)
+├── dimension/
+│   ├── CardDimensionGenerator  custom terrain (rolling hills, purple-tinted biome)
+│   ├── CardDimensionOrePopulator ore veins minus diamond, plus Ancient Debris
+│   ├── CardDimensionTreePopulator sparse spruce trees
+│   ├── CardDimensionManager    world/portal creation, datapack extraction, persistence
+│   ├── SpecialMatterManager    builds/identifies the portal-activation item
+│   ├── PortalProtectionListener unbreakable frame/interior blocks + blocks player-lit portals
+│   ├── SpecialMatterListener   lodestone + Special Matter activation ritual
+│   ├── PortalTravelListener    redirects both portals between CardDimension and overworld
+│   └── FirstJoinListener       sends brand-new players to CardDimension
+├── listeners/
+│   ├── CardEquipListener       right-click to equip cards/legendaries
+│   ├── ActiveCardListener      sneak+right-click ability triggers
+│   ├── CombatListener          all on-hit passive card + legendary effects
+│   ├── MovementListener        fall damage, armor durability, sneak, webs, XP cards
+│   ├── DeathListener           mystery card drop on kill
+│   ├── MysteryDropListener     use-now/keep GUI for mystery card drops
+│   ├── FusionListener          anvil combine Fang + Vampiric Claws → Vampiric Fang
+│   └── GambitCommand           /gambit admin & utility command
+└── util/
+    └── PeriodicTaskManager     all "every second/30s/60s" passive card effects
+```

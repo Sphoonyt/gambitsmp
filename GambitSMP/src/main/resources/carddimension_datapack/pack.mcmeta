@@ -1,0 +1,10 @@
+{
+  "pack": {
+    "pack_format": 26,
+    "supported_formats": {
+      "min_inclusive": 18,
+      "max_inclusive": 48
+    },
+    "description": "GambitSMP: recolors the unused 'the_void' biome purple, used only inside CardDimension. A mismatched pack_format here is a warning, not a hard failure - datapacks (unlike resource packs) generally still load with an old/new format, just with a console notice."
+  }
+}

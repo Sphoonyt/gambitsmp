@@ -1,0 +1,262 @@
+package com.gambitsmp.listeners;
+
+import com.gambitsmp.GambitSMP;
+import com.gambitsmp.cards.CardType;
+import com.gambitsmp.legendary.LegendaryType;
+import com.gambitsmp.player.PlayerCardData;
+import com.gambitsmp.shrine.ShrineType;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import org.bukkit.Bukkit;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.block.Block;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandExecutor;
+import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabCompleter;
+import org.bukkit.entity.Player;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+
+public class GambitCommand implements CommandExecutor, TabCompleter {
+
+    private final GambitSMP plugin;
+
+    public GambitCommand(GambitSMP plugin) {
+        this.plugin = plugin;
+    }
+
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (args.length == 0) {
+            sender.sendMessage(Component.text("/gambit cards - open your card GUI", NamedTextColor.YELLOW));
+            sender.sendMessage(Component.text("/gambit spawn - travel to CardDimension", NamedTextColor.YELLOW));
+            if (sender.hasPermission("gambitsmp.admin")) {
+                sender.sendMessage(Component.text("/gambit menu|give|shrine|cards <player>|unequip|reset|info", NamedTextColor.YELLOW));
+            }
+            return true;
+        }
+
+        switch (args[0].toLowerCase()) {
+            case "menu" -> handleMenu(sender);
+            case "give" -> handleGive(sender, args);
+            case "shrine" -> handleShrine(sender, args);
+            case "cards" -> handleCards(sender, args);
+            case "unequip" -> handleUnequip(sender, args);
+            case "reset" -> handleReset(sender, args);
+            case "spawn" -> handleSpawn(sender);
+            case "info" -> sender.sendMessage(Component.text("GambitSMP - custom card SMP plugin", NamedTextColor.AQUA));
+            default -> sender.sendMessage(Component.text("Unknown subcommand.", NamedTextColor.RED));
+        }
+        return true;
+    }
+
+    private void handleSpawn(CommandSender sender) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(Component.text("Players only.", NamedTextColor.RED));
+            return;
+        }
+        var location = plugin.cardDimension().getSpawnLocation();
+        if (location == null || location.getWorld() == null) {
+            sender.sendMessage(Component.text("CardDimension isn't available right now.", NamedTextColor.RED));
+            return;
+        }
+        player.teleport(location);
+        player.sendMessage(Component.text("Welcome to CardDimension.", NamedTextColor.LIGHT_PURPLE));
+    }
+
+    private boolean requireAdmin(CommandSender sender) {
+        if (sender.hasPermission("gambitsmp.admin")) return true;
+        sender.sendMessage(Component.text("You do not have permission to do that.", NamedTextColor.RED));
+        return false;
+    }
+
+    private void handleMenu(CommandSender sender) {
+        if (!requireAdmin(sender)) return;
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(Component.text("Players only.", NamedTextColor.RED));
+            return;
+        }
+        plugin.cardGui().openAdminMenu(player);
+    }
+
+    private void handleGive(CommandSender sender, String[] args) {
+        if (!requireAdmin(sender)) return;
+        if (args.length < 3) {
+            sender.sendMessage(Component.text("Usage: /gambit give <card|legendary|specialmatter> <player> [type]", NamedTextColor.RED));
+            return;
+        }
+        Player target = Bukkit.getPlayerExact(args[2]);
+        if (target == null) {
+            sender.sendMessage(Component.text("Player not found.", NamedTextColor.RED));
+            return;
+        }
+        try {
+            if (args[1].equalsIgnoreCase("card")) {
+                if (args.length < 4) {
+                    sender.sendMessage(Component.text("Usage: /gambit give card <player> <type>", NamedTextColor.RED));
+                    return;
+                }
+                CardType type = CardType.valueOf(args[3].toUpperCase());
+                target.getInventory().addItem(plugin.cards().createCard(type));
+            } else if (args[1].equalsIgnoreCase("legendary")) {
+                if (args.length < 4) {
+                    sender.sendMessage(Component.text("Usage: /gambit give legendary <player> <type>", NamedTextColor.RED));
+                    return;
+                }
+                LegendaryType type = LegendaryType.valueOf(args[3].toUpperCase());
+                target.getInventory().addItem(plugin.legendaries().createLegendary(type));
+            } else if (args[1].equalsIgnoreCase("specialmatter")) {
+                target.getInventory().addItem(plugin.specialMatter().createItem());
+            } else {
+                sender.sendMessage(Component.text("Type must be 'card', 'legendary', or 'specialmatter'.", NamedTextColor.RED));
+                return;
+            }
+            sender.sendMessage(Component.text("Given.", NamedTextColor.GREEN));
+        } catch (IllegalArgumentException ex) {
+            sender.sendMessage(Component.text("Unknown card/legendary name.", NamedTextColor.RED));
+        }
+    }
+
+    private void handleShrine(CommandSender sender, String[] args) {
+        if (!requireAdmin(sender)) return;
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(Component.text("Only players can place shrines.", NamedTextColor.RED));
+            return;
+        }
+        if (args.length < 3 || !args[1].equalsIgnoreCase("create")) {
+            sender.sendMessage(Component.text("Usage: /gambit shrine create <glory|abysmal|opportunity>", NamedTextColor.RED));
+            return;
+        }
+        try {
+            ShrineType type = ShrineType.valueOf(args[2].toUpperCase());
+            Block target = player.getTargetBlockExact(10);
+            if (target == null) {
+                sender.sendMessage(Component.text("Look at a block within 10 blocks.", NamedTextColor.RED));
+                return;
+            }
+            plugin.shrines().addShrine(type, target.getLocation());
+            sender.sendMessage(Component.text("Shrine of " + type.name() + " created at "
+                    + target.getX() + ", " + target.getY() + ", " + target.getZ(), NamedTextColor.GREEN));
+        } catch (IllegalArgumentException ex) {
+            sender.sendMessage(Component.text("Unknown shrine type.", NamedTextColor.RED));
+        }
+    }
+
+    private void handleCards(CommandSender sender, String[] args) {
+        if (args.length == 1) {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage(Component.text("Usage: /gambit cards <player>", NamedTextColor.RED));
+                return;
+            }
+            plugin.cardGui().openEquipGui(player);
+            return;
+        }
+
+        if (!requireAdmin(sender)) return;
+        Player target = Bukkit.getPlayerExact(args[1]);
+        if (target == null) {
+            sender.sendMessage(Component.text("Player not found.", NamedTextColor.RED));
+            return;
+        }
+
+        PlayerCardData data = plugin.data().get(target.getUniqueId());
+        sender.sendMessage(Component.text("--- " + target.getName() + "'s cards ---", NamedTextColor.GOLD));
+        if (data.equippedCards().isEmpty()) {
+            sender.sendMessage(Component.text("No cards equipped.", NamedTextColor.GRAY));
+        }
+        for (CardType type : data.equippedCards()) {
+            sender.sendMessage(Component.text("- " + type.displayName(), type.rarity().color()));
+        }
+        if (!data.equippedLegendaries().isEmpty()) {
+            sender.sendMessage(Component.text("Legendaries:", NamedTextColor.LIGHT_PURPLE));
+            data.equippedLegendaries().forEach(l -> sender.sendMessage(Component.text("- " + l.itemName(), NamedTextColor.GOLD)));
+        }
+        var maxAttr = target.getAttribute(Attribute.GENERIC_MAX_HEALTH);
+        if (maxAttr != null) {
+            sender.sendMessage(Component.text("Max hearts: " + (maxAttr.getBaseValue() / 2.0), NamedTextColor.RED));
+        }
+    }
+
+    private void handleUnequip(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(Component.text("Players only.", NamedTextColor.RED));
+            return;
+        }
+        if (args.length < 2) {
+            sender.sendMessage(Component.text("Usage: /gambit unequip <card>", NamedTextColor.RED));
+            return;
+        }
+        try {
+            CardType type = CardType.valueOf(args[1].toUpperCase());
+            PlayerCardData data = plugin.data().get(player.getUniqueId());
+            if (!data.hasCard(type)) {
+                sender.sendMessage(Component.text("You don't have that card equipped.", NamedTextColor.RED));
+                return;
+            }
+            data.equippedCards().remove(type);
+            player.getInventory().addItem(plugin.cards().createCard(type));
+            sender.sendMessage(Component.text("Unequipped " + type.displayName() + ".", NamedTextColor.GREEN));
+        } catch (IllegalArgumentException ex) {
+            sender.sendMessage(Component.text("Unknown card.", NamedTextColor.RED));
+        }
+    }
+
+    private void handleReset(CommandSender sender, String[] args) {
+        if (!requireAdmin(sender)) return;
+        if (args.length < 2) {
+            sender.sendMessage(Component.text("Usage: /gambit reset <player>", NamedTextColor.RED));
+            return;
+        }
+        Player target = Bukkit.getPlayerExact(args[1]);
+        if (target == null) {
+            sender.sendMessage(Component.text("Player not found.", NamedTextColor.RED));
+            return;
+        }
+        PlayerCardData data = plugin.data().get(target.getUniqueId());
+        data.equippedCards().clear();
+        data.bannedCards().clear();
+        data.equippedLegendaries().clear();
+        var attr = target.getAttribute(Attribute.GENERIC_MAX_HEALTH);
+        if (attr != null) {
+            target.setHealth(attr.getValue());
+        }
+        sender.sendMessage(Component.text("Reset " + target.getName() + ".", NamedTextColor.GREEN));
+    }
+
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (args.length == 1) {
+            return filter(List.of("cards", "menu", "give", "shrine", "unequip", "reset", "spawn", "info"), args[0]);
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("cards")) {
+            return filter(Bukkit.getOnlinePlayers().stream().map(Player::getName).collect(Collectors.toList()), args[1]);
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("give")) {
+            return filter(List.of("card", "legendary", "specialmatter"), args[1]);
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("shrine")) {
+            return filter(List.of("create"), args[1]);
+        }
+        if (args.length == 3 && args[0].equalsIgnoreCase("shrine")) {
+            return filter(Arrays.stream(ShrineType.values()).map(Enum::name).collect(Collectors.toList()), args[2]);
+        }
+        if (args.length == 4 && args[0].equalsIgnoreCase("give") && args[1].equalsIgnoreCase("card")) {
+            return filter(Arrays.stream(CardType.values()).map(Enum::name).collect(Collectors.toList()), args[3]);
+        }
+        if (args.length == 4 && args[0].equalsIgnoreCase("give") && args[1].equalsIgnoreCase("legendary")) {
+            return filter(Arrays.stream(LegendaryType.values()).map(Enum::name).collect(Collectors.toList()), args[3]);
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("unequip")) {
+            return filter(Arrays.stream(CardType.values()).map(Enum::name).collect(Collectors.toList()), args[1]);
+        }
+        return new ArrayList<>();
+    }
+
+    private List<String> filter(List<String> options, String prefix) {
+        return options.stream().filter(o -> o.toLowerCase().startsWith(prefix.toLowerCase())).collect(Collectors.toList());
+    }
+}
