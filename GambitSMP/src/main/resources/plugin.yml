@@ -1,0 +1,24 @@
+name: GambitSMP
+version: '1.0.0'
+main: com.gambitsmp.GambitSMP
+api-version: '1.20'
+author: GambitSMP
+description: Custom card-based ability plugin for GambitSMP
+
+commands:
+  gambit:
+    description: GambitSMP command - /gambit cards opens your card GUI, admins get more subcommands
+    usage: /gambit <cards|menu|give|shrine|reset|unequip|info> ...
+  ability:
+    description: Trigger one of your equipped active cards
+    usage: /ability [slot number]
+    permission: gambitsmp.ability
+    permission-message: You do not have permission to use this command.
+
+permissions:
+  gambitsmp.admin:
+    description: Access to GambitSMP admin commands (give, shrine, reset, menu)
+    default: op
+  gambitsmp.ability:
+    description: Access to the /ability command
+    default: true
